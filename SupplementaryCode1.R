@@ -1,3 +1,10 @@
+# PROBLEMS:
+# Missing object: model1 (the output of the null model I suppose)
+# Missing object: change2abs
+# Missing object: species.change.list2.neg, species.change.list2.pos
+# Missing object: species.change.list2abs.neg
+# Missing object: change2
+
 # R code for the analyses in: 
 # Jandt, U., Bruelheide, H., Jansen, J., Bonn, A., Grescho, V., Klenke, R., 
 # Sabatini, F.M., Bernhardt-Römermann, M., Blüml, V., Dengler, J., 
@@ -17,6 +24,7 @@ library(data.table)  # for aggregating data
 library(ggplot2)     # for graphics
 library(DescTools)   # Gini coefficient
 library(BSDA)        # sign test
+library(ineq)        # Lorenz Curve
 library(Hmisc)       # error bars in Fig. 4
 library(matrixStats) # to calculate rowRanks
 library(vegan)       # Shannon diversity
@@ -74,18 +82,15 @@ length(unique(DT2$project))
 # Split RELEVE_NR_comb in header into project ID
 header$project <- as.numeric(tstrsplit(header$RELEVE_NR_comb,"_")[[1]])
 
-##Creat cross-link table between project names and sequantial id
+##Create cross-link table between project names and sequantial id
 Projects <- header[!duplicated(header[,c("project", "RS_PROJECT")]), c("project", "RS_PROJECT")]
 ### Step. 2: Calculation of change 
 # both by resurvey ID x species x time interval combinations 
 # (species.change.list) and by
 # resurvey ID x time interval combinations
 # (richness.change.list)
-species.change.list <- data.frame(project=NULL, perm_plot_ID=NULL,
-                                  from.n=NULL, to.n=NULL,from=NULL, to=NULL,species=NULL,
-                                  absolute.change=NULL, relative.change=NULL, relative.rank.change=NULL,
-                                  log.repsonse.change=NULL, absolute.change.colonizer=NULL,
-                                  absolute.change.extinct=NULL)
+
+species.change.list <- list()
 # richness.change.list holds the different metrics for the
 # resurvey ID x time interval combinations
 richness.change.list <- data.frame(project=NULL, perm_plot_ID=NULL,
@@ -97,7 +102,13 @@ richness.change.list <- data.frame(project=NULL, perm_plot_ID=NULL,
 # Tha analysis is done project-wise, which allows to analyse community-level changes 
 # together with plot-specific changes (i.e. those taken on (semi-)permanent plots)
 # species.change.list holds the 
-for (i in c(43:length(unique(DT2$project)))){
+#library(doParallel)
+#cl <- makeForkCluster(8, outfile="dopar.txt")
+#registerDoParallel(cl)
+
+
+#out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {  
+for (i in c(1:length(unique(DT2$project)))){
   print(i)
   # loop for all 92 projects
   # select the species cover data from a given project
@@ -261,7 +272,9 @@ for (i in c(43:length(unique(DT2$project)))){
         n.losses <- length(diff.rel.cover[diff.rel.cover<0])
         
         # collect all metrics for resurvey ID x species x time interval combinations
-        species.change.list <- rbind(species.change.list,data.frame(
+        
+        ## FMS: Switching to LIST increases the speed of this loop substantially (since it avoids R overwriting a vector with 10^5 rows at every epoch)
+        species.change.list[[i]] <- data.frame( 
           project=Projects$RS_PROJECT[i],
           perm_plot_ID=plot.list[j],
           from.n=as.numeric(n[k+1]), to.n=as.numeric(n[k]), from=as.numeric(names(n)[k+1]),
@@ -271,7 +284,7 @@ for (i in c(43:length(unique(DT2$project)))){
           relative.change=as.numeric(diff.relative.change),
           relative.rank.change=as.numeric(diff.relative.rank.change),
           absolute.change.colonizer=as.numeric(diff.absolute.change.colonizer),
-          absolute.change.extinct=as.numeric(diff.absolute.change.extinct)))
+          absolute.change.extinct=as.numeric(diff.absolute.change.extinct))
 
         # collect all metrics for resurvey ID x time interval combinations
         # and calculate log response ratios for all metrics
@@ -290,8 +303,11 @@ for (i in c(43:length(unique(DT2$project)))){
           diff.gains.losses=n.gains-n.losses))
       }
     }
-  }  
+  }
 }
+
+species.change.list <- do.call(rbind, species.change.list) #FMS convert back to data.frame
+
 dim(richness.change.list) #  13987     16  in_MS Fig.2, Results, Methods
 # correct!
 length(unique(paste(richness.change.list$project,richness.change.list$perm_plot_ID)))
@@ -349,8 +365,9 @@ Fig1a <- ggplot(data=richness.change.list, aes(x=log.richness.change)) +
     plot.title = element_text(color = "black", size = 10),
     legend.position="none",
     axis.line = element_line(size = 1, color = "grey50")) +
-  geom_vline(xintercept = coef(summary(model1))[1],
-             linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
+## MISSING: output from null model, if needed
+#  geom_vline(xintercept = coef(summary(model1))[1],  
+#             linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
   geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
 Fig1a
 
@@ -403,9 +420,10 @@ ExtendedDataFig4 <- ggplot(data=change, aes(x=sqrt(abs(mean.absolute.change))*si
         plot.title = element_text(color = "black", size = 10),
         legend.position="none",
         axis.line = element_line(size = 1, color = "grey50")) +
-  geom_vline(xintercept = median(sqrt(abs(change2abs$mean.absolute.change))*
-                                   sign(change2abs$mean.absolute.change), na.rm=T),
-             linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
+  ## FMS: MISSING
+  #geom_vline(xintercept = median(sqrt(abs(change2abs$mean.absolute.change))*
+  #                                 sign(change2abs$mean.absolute.change), na.rm=T),
+  #           linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
   geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
 ExtendedDataFig4
 
@@ -441,8 +459,9 @@ Fig1b <- ggplot(data=change[n>=100,], aes(x=mean.absolute.change)) +
         plot.title = element_text(color = "black", size = 10),
         legend.position="none",
         axis.line = element_line(size = 1, color = "grey50")) +
-  geom_vline(xintercept = mean(change2abs$mean.absolute.change[change2abs$n>=100], na.rm=T),
-             linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
+  ## FMS: Missing
+  #geom_vline(xintercept = mean(change2abs$mean.absolute.change[change2abs$n>=100], na.rm=T),
+  #           linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
   geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
 Fig1b
 
@@ -499,6 +518,13 @@ dev.off() # creates a file
 # of increments and decrements across all species
 # making use of the DescTools package to calculate the
 # Lorenz curve for decrements
+
+
+## FMS: Addition. Please Check
+species.change.list2.neg <- species.change.list2[which(species.change.list2$absolute.change<0),]
+species.change.list2.pos <- species.change.list2[which(species.change.list2$absolute.change>0),]
+## END OF FMS Addition
+
 lorenz.curve.neg <- Lc(abs(species.change.list2.neg$absolute.change))
 # and the Lorenz curve for increments
 lorenz.curve.pos <- Lc(abs(species.change.list2.pos$absolute.change))
@@ -566,11 +592,12 @@ mtext("a",side=2,line=4, at=1.05, las=1, cex=3)
 dev.off()
 
 # Calcultate the Gini coefficient
+# FMS: Missing species.change.list2abs.neg --> Should it be species.change.list2.neg?
 Gini(x = abs(species.change.list2abs.neg$absolute.change),conf.level=0.95, R=1000, 
      type="perc", unbiased=T) 
  '     gini    lwr.ci    upr.ci 
  0.7122290 0.7106420 0.7137571  '
-     
+# FMS: Missing species.change.list2abs.pos --> Should it be species.change.list2.pos?
 Gini(x = abs(species.change.list2abs.pos$absolute.change),conf.level=0.95, R=1000, 
     type="perc", unbiased=T) 
 '      gini    lwr.ci    upr.ci 
@@ -580,6 +607,7 @@ Gini(x = abs(species.change.list2abs.pos$absolute.change),conf.level=0.95, R=100
 # of increments and decrements across all species
 
 # devide species by their mean decrease, increase and absence of change
+## FMS: Missing change2  --> Is this equivalent to change2b?
 change <- change2[order(change2$mean.absolute.change, decreasing = T),]
 change.neg <- change[mean.absolute.change<0,]
 dim(change.neg) [[1]] #1011
