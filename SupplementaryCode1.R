@@ -24,10 +24,12 @@ library(data.table)  # for aggregating data
 library(ggplot2)     # for graphics
 library(DescTools)   # Gini coefficient
 library(BSDA)        # sign test
-library(ineq)        # Lorenz Curve
 library(Hmisc)       # error bars in Fig. 4
 library(matrixStats) # to calculate rowRanks
-library(vegan)       # Shannon diversity
+## Added by FMS
+library(ineq)        # Lorenz Curve 
+library(vegan)       # Shannon diversity  
+
 
 ## Ancillary Function
 # The records of species cover values were made by layer
@@ -102,12 +104,7 @@ richness.change.list <- data.frame(project=NULL, perm_plot_ID=NULL,
 # Tha analysis is done project-wise, which allows to analyse community-level changes 
 # together with plot-specific changes (i.e. those taken on (semi-)permanent plots)
 # species.change.list holds the 
-#library(doParallel)
-#cl <- makeForkCluster(8, outfile="dopar.txt")
-#registerDoParallel(cl)
 
-
-#out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {  
 for (i in c(1:length(unique(DT2$project)))){
   print(i)
   # loop for all 92 projects
