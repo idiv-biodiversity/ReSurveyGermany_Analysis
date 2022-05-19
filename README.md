@@ -3,4 +3,6 @@ Jandt, U., Bruelheide, H., Jansen, J., Bonn, A., Grescho, V., Klenke, R., Sabati
 
 This R code transforms the data from ReSurveyGermany, and formats them into "resurvey ID x species x time interval" combinations. These data are then analyzed to highlight the temporal change in species distribution, which is finally visualized as in the paper.  
 
-The underlying data will be made freely available in [the iData Portal](iData.idiv.de/) of the [German Center for Integrative Biodiversity Research - iDiv](https://www.idiv.de/en) upon acceptance of the paper. 
+The underlying data will be made freely available in [the iData Portal](iData.idiv.de/) of the [German Center for Integrative Biodiversity Research - iDiv](https://www.idiv.de/en) upon acceptance of the paper.  
+**DOI of the Dataset:** [https://doi.org/10.25829/idiv.3508-c17blk](https://doi.org/10.25829/idiv.3508-c17blk) - Not yet active
+
