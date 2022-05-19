@@ -6,6 +6,7 @@
 # Missing object: col.vector3 --> Commented -> graph produced without colors
 # Missing column in object change2b: $eunis.class --> Commented -> Graph produced without colors
 # Missing object: change2 --> Replaced with 'change'
+# Results from line 658 cannot be reproduced
 
 # R code for the analyses in: 
 # Jandt, U., Bruelheide, H., Jansen, J., Bonn, A., Grescho, V., Klenke, R., 
