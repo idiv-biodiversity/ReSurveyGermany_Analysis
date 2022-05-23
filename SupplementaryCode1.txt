@@ -317,7 +317,7 @@ species.change.list2$decade <- floor(species.change.list2$mid.year/10)*10
 species.change.list2$end.decade <- floor(species.change.list2$to/10)*10
 species.change.list2$slope <- species.change.list2$relative.change/(species.change.list2$to-species.change.list2$from)
 species.change.list2$RS_PROJECT_PLOT <- paste(species.change.list2$RS_PROJECT,
-                                species.change.list2$RS_PLOT, sep="_")
+                                              species.change.list2$RS_PLOT, sep="_")
 str(species.change.list2) #458311 obs. of  17 variables, in_MS Results, Methods
 
 ### Step. 3: Calculation of change at the plot level
@@ -365,9 +365,9 @@ Fig1a <- ggplot(data=richness.change.list, aes(x=log.richness.change)) +
     plot.title = element_text(color = "black", size = 10),
     legend.position="none",
     axis.line = element_line(size = 1, color = "grey50")) +
-    geom_vline(xintercept = coef(summary(model1))[1],  
-               linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
-    geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
+  geom_vline(xintercept = coef(summary(model1))[1],  
+             linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
+  geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
 Fig1a
 
 # Statistical test and confidence intervals for each metric
@@ -386,10 +386,10 @@ sample estimates:
 # (=absolute.change) by species
 species.change.list2 <- data.table(species.change.list2)
 change <- species.change.list2[,{n_pos <- length(absolute.change[absolute.change>0]);
-  n_neg <- length(absolute.change[absolute.change<0]);
-  n_all <- ifelse(n_pos+n_neg>0,n_pos+n_neg,1);
-  est <- binom.test(n_pos,n_all);
-  list(n=length(absolute.change),
+n_neg <- length(absolute.change[absolute.change<0]);
+n_all <- ifelse(n_pos+n_neg>0,n_pos+n_neg,1);
+est <- binom.test(n_pos,n_all);
+list(n=length(absolute.change),
      pos=length(absolute.change[absolute.change>0]),
      equal=length(absolute.change[absolute.change==0]), neg=length(absolute.change[absolute.change<0]),
      est.binom=est$estimate,
@@ -589,12 +589,10 @@ mtext("a",side=2,line=4, at=1.05, las=1, cex=3)
 dev.off()
 
 # Calculate the Gini coefficient
-# FMS: Missing species.change.list2abs.neg --> Should it be species.change.list2.neg?
 DescTools::Gini(x = abs(species.change.list2.neg$absolute.change),conf.level=0.95, R=1000, 
                 type="perc", unbiased=T) 
 '     gini    lwr.ci    upr.ci 
 0.7122407 0.7106913 0.7137028 '
-# FMS: Missing species.change.list2abs.pos --> Should it be species.change.list2.pos?
 DescTools::Gini(x = abs(species.change.list2.pos$absolute.change),conf.level=0.95, R=1000, 
                 type="perc", unbiased=T) 
 '     gini    lwr.ci    upr.ci 
@@ -662,7 +660,9 @@ lorenz.curve.change.pos <- Lc(abs(change.pos$mean.absolute.change))
 # Plot the Lorenz curve
 # Fig. 2b
 png(filename="Fig2b.png", width=800, height=600, units = "px", bg="white")
-plot(decr[,2] ~ decr[,1], type="n", xlab="Proportion of species", 
+decr0 <- decr
+rownames(decr0) <- NULL
+plot(decr0[,2] ~ decr0[,1], type="n", xlab="Proportion of species", 
      ylab="Proportion of observed absolute changes",
      cex=2, cex.axis=2, cex.lab=2)
 lines(lorenz.curve.change.neg, conf.level=0.95,
