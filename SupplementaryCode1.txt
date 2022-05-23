@@ -1,13 +1,3 @@
-# PROBLEMS:
-# Missing object: model1 (the output of the null model I suppose)
-# Missing object: change2abs --> replaced with change2b
-# Missing object: species.change.list2.neg, species.change.list2.pos --> produced by FMS, please check
-# Missing object: species.change.list2abs.neg, species.change.list2abs.pos --> replaced with objects above, please check 
-# Missing object: col.vector3 --> Commented -> graph produced without colors
-# Missing column in object change2b: $eunis.class --> Commented -> Graph produced without colors
-# Missing object: change2 --> Replaced with 'change'
-# Results from line 658 cannot be reproduced
-
 # R code for the analyses in: 
 # Jandt, U., Bruelheide, H., Jansen, J., Bonn, A., Grescho, V., Klenke, R., 
 # Sabatini, F.M., Bernhardt-Römermann, M., Blüml, V., Dengler, J., 
@@ -20,19 +10,19 @@
 # one century in Germany: more losers than winners. 
 # Nature
 #
-# Author: Helge Bruelheide, 26.02.2022
+# Author: Helge Bruelheide, 23.05.2022
+# with contributions of Francesco Maria Sabatini 19.05.2022
 
 library(reshape2)    # for casting matrices
 library(data.table)  # for aggregating data
 library(ggplot2)     # for graphics
-library(DescTools)   # Gini coefficient
+library(DescTools)   # Gini coefficient and Lorenz curve
 library(BSDA)        # sign test
 library(Hmisc)       # error bars in Fig. 4
-library(matrixStats) # to calculate rowRanks
-## Added by FMS
-library(ineq)        # Lorenz Curve 
 library(vegan)       # Shannon diversity  
-library(doParallel)  # Optimize for loop
+library(matrixStats) # to calculate rowRanks
+library(lmerTest)    # for mixed effects models (lmer)
+library(parameters)  # for credible intervals for lmer
 
 ## Ancillary Function
 # The records of species cover values were made by layer
@@ -52,43 +42,43 @@ combine.cover <- function(x){
 
 ### Step. 1: Load data
 setwd("c:\\Daten\\GVRD\\Data_GVRD6")  #choose your working directory
-DT <- read.csv(file="DT4_no_cryp_layer.csv")
+DT <- read.csv(file="ReSurveyGermany.csv")
 DT <- data.table(DT)
-str(DT) #610313 obs. of  5 variables:
+str(DT) #610313 obs. of  6 variables:
 # DT holds 
-# RELEVE_NR: ID within project
+# PROJECT_ID:     ID of the project
+# RELEVE_NR:      ID for plot records within the project
+# PROJECT_ID_RELEVE_NR: ID across all projects, links DT to header
 # LAYER:          code for the layer
 # TaxonName:      Harmonized taxonomic name
 # Cover_Perc:     Per cent cover of the species in the plot
-# RELEVE_NR_comb: ID across all projects, links DT to header
 
 # Load header data
-header <- read.csv("header_resurvey4.csv")
-str(header) # 23641 obs. of  77 variables:
+header <- read.csv("Header_ReSurveyGermany.csv")
+str(header) # 23641 obs. of  47 variables:
 
 # Link DT to header
-index1 <- match(DT$RELEVE_NR, header$RELEVE_NR_comb)
+index1 <- match(DT$PROJECT_ID_RELEVE_NR, header$PROJECT_ID_RELEVE_NR)
 
-length(unique(header$project_perm_plot_ID))
+header$RS_PROJECT_PLOT <- paste(header$PROJECT_ID, header$RS_PLOT, sep="_")
+length(unique(header$RS_PROJECT_PLOT))
 # In total, there are 7738 time series
 
 # Combine cover of species across layers
-DT2 <- DT[,list(Cover_Perc=combine.cover(Cover_Perc)), by=list(RELEVE_NR,TaxonName)]
+DT2 <- DT[,list(Cover_Perc=combine.cover(Cover_Perc)), by=list(PROJECT_ID_RELEVE_NR,TaxonName)]
 str(DT2)
 # 583395 obs. of  3 variables
 
 # Split RELEVE_NR_comb in DT into project-specific RELEVE_NR and project ID
-DT2$project <- as.numeric(tstrsplit(DT2$RELEVE_NR,"_")[[1]])
-DT2$RELEVE_NR <- as.numeric(tstrsplit(DT2$RELEVE_NR,"_")[[2]])
+DT2$PROJECT_ID   <- as.numeric(tstrsplit(DT2$PROJECT_ID_RELEVE_NR,"_")[[1]])
+DT2$RELEVE_NR <- as.numeric(tstrsplit(DT2$PROJECT_ID_RELEVE_NR,"_")[[2]])
 
-length(unique(DT2$project))
+length(unique(DT2$PROJECT_ID))
 # In total, there are 92 projects
 
-# Split RELEVE_NR_comb in header into project ID
-header$project <- as.numeric(tstrsplit(header$RELEVE_NR_comb,"_")[[1]])
+##Create cross-link table between project names and sequential id
+Projects <- header[!duplicated(header[,c("PROJECT_ID", "RS_PROJECT")]), c("PROJECT_ID", "RS_PROJECT")]
 
-##Create cross-link table between project names and sequantial id
-Projects <- header[!duplicated(header[,c("project", "RS_PROJECT")]), c("project", "RS_PROJECT")]
 ### Step. 2: Calculation of change 
 # both by resurvey ID x species x time interval combinations 
 # (species.change.list) and by
@@ -96,37 +86,29 @@ Projects <- header[!duplicated(header[,c("project", "RS_PROJECT")]), c("project"
 
 # Tha analysis is done project-wise, which allows to analyse community-level changes 
 # together with plot-specific changes (i.e. those taken on (semi-)permanent plots)
-# species.change.list holds the 
-cl <- makeForkCluster(8, outfile="dopar.txt")
-registerDoParallel(cl)
+species.change.list <- data.frame(RS_PROJECT=NULL, RS_PLOT=NULL,
+                                  from.n=NULL, to.n=NULL,from=NULL, to=NULL,species=NULL,
+                                  absolute.change=NULL, relative.change=NULL, relative.rank.change=NULL,
+                                  log.repsonse.change=NULL, absolute.change.colonizer=NULL,
+                                  absolute.change.extinct=NULL)
+# richness.change.list holds the different metrics for the
+# resurvey ID x time interval combinations
+richness.change.list <- data.frame(RS_PROJECT=NULL, RS_PLOT=NULL,
+                                   from.n=NULL, to.n=NULL,from=NULL, to=NULL,log.richness.change=NULL,
+                                   log.shannon.change=NULL, log.evenness.change=NULL, curve.diff=NULL,
+                                   log.rank.change=NULL,log.rank.change.sum=NULL,
+                                   mean.cover.change=NULL, median.cover.change=NULL,
+                                   diff.gains.losses=NULL)
 
-out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
-#for (i in c(1:length(unique(DT2$project)))){
-  #FMS - Create empty objects
-  out <- list() 
-  # (richness.change.list)
-  species.change.list <- data.frame(project=NULL, perm_plot_ID=NULL,
-                                    from.n=NULL, to.n=NULL,from=NULL, to=NULL,species=NULL,
-                                    absolute.change=NULL, relative.change=NULL, relative.rank.change=NULL,
-                                    log.repsonse.change=NULL, absolute.change.colonizer=NULL,
-                                    absolute.change.extinct=NULL)
-  # richness.change.list holds the different metrics for the
-  # resurvey ID x time interval combinations
-  richness.change.list <- data.frame(project=NULL, perm_plot_ID=NULL,
-                                     from.n=NULL, to.n=NULL,from=NULL, to=NULL,log.richness.change=NULL,
-                                     log.shannon.change=NULL, log.evenness.change=NULL, curve.diff=NULL,
-                                     log.rank.change=NULL,log.rank.change.sum=NULL,
-                                     mean.cover.change=NULL, median.cover.change=NULL,
-                                     diff.gains.losses=NULL)
-  
+# loop for all 92 projects
+for (i in c(1:length(unique(DT2$PROJECT_ID)))){
   print(i)
-  # loop for all 92 projects
   # select the species cover data from a given project
-  species.long <- DT2[DT2$project==i,]
+  species.long <- DT2[DT2$PROJECT_ID==i,]
   # turn the long format into a RELEVE_NR by TaxonName matrix
-  species <- acast(species.long, RELEVE_NR~TaxonName, value.var ="Cover_Perc", fill=0)
+  species <- reshape2::acast(species.long, RELEVE_NR~TaxonName, value.var ="Cover_Perc", fill=0)
   # select the header data from a given project
-  env <- header[header$project==i,]
+  env <- header[header$PROJECT_ID==i,]
   RELEVE_NR=env$RELEVE_NR
   year <- as.matrix(env$YEAR)
   dimnames(year)[[1]] <- env$RELEVE_NR
@@ -134,28 +116,28 @@ out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
   # RS_PLOT holds a unique (within the site) code of the resurveyed plot; 
   # it is used to pair observations from different times recorded in 
   # the same plot; gives a unique identifier for the resurveyed plot or 
-  # set of plots in time if combined with RS_PROJECT (see project_perm_plot_ID ). 
+  # set of plots in time if combined with RS_PROJECT (see RS_PROJECT_PLOT). 
   # Several plots in the same year might have the same RS_PLOT code if they have 
   # to be summarised for temporal comparisons.
-  perm_plot_ID <- env$RS_PLOT
-  # plot.list holds the list of all perm_plot_ID
-  plot.list <- sort(names(table(perm_plot_ID))[table(perm_plot_ID)>1])
+  RS_PLOT <- env$RS_PLOT
+  # plot.list holds the list of all RS_PLOT
+  plot.list <- sort(names(table(RS_PLOT))[table(RS_PLOT)>1])
   # produce a presence/absence version of the RELEVE_NR by TaxonName matrix
   species_pa <- species
   species_pa[species_pa > 0] <- 1
   
   # link vegetation data to header data for this project
   index2 <- match(RELEVE_NR,env$RELEVE_NR)
-  # loop for all perm_plot_ID
+  # loop for all RS_PLOT
   for (j in 1:length(plot.list)){
-    target.year <- year[perm_plot_ID %in% plot.list[j],]
+    target.year <- year[RS_PLOT %in% plot.list[j],]
     if (length(unique(target.year))>1){
       # Check whether the plot series actually has more than one data
       # this might happen when a previous plot was recorded several times
       # but no new record was made
       
       # produce a subset of the plot by species matrix
-      species.target.plot <- species[perm_plot_ID %in% plot.list[j],]
+      species.target.plot <- species[RS_PLOT %in% plot.list[j],]
       # Remove empty cols, i.e. species that do not occur in the subset
       species.target.plot <- species.target.plot[,colSums(species.target.plot)!=0, drop=F]
       # produce a presence/absence version of the species.target.plot matrix
@@ -213,7 +195,7 @@ out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
       dimnames(species.target.plot.ranks2)[[2]] <- colnames(species.target.plot2)
       # turn ranks into relative ranks
       species.target.plot.ranks2 <- sweep(species.target.plot.ranks2, 1, apply(species.target.plot.ranks2,1,FUN=max), FUN="/")
-
+      
       # calculate delta curve (curve.diff) according to Avolio et al. (2019)
       unique.relative.ranks <- c(0,unique(sort(species.target.plot.ranks2)))
       species.target.plot.ranks3 <- apply(species.target.plot.ranks2,2,FUN=cut,breaks=unique.relative.ranks, labels=F)
@@ -229,7 +211,7 @@ out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
         curve.diff <- curve.diff+y1sum-y2sum
       }
       curve.diff
-
+      
       # calculate rank change (rank.change) according to Avolio et al. (2019)
       species.target.plot.ranks4 <- species.target.plot.ranks2[1,]-species.target.plot.ranks2[2,]
       rank.change <- sum(abs(species.target.plot.ranks4))/ncol(species.target.plot.ranks2)
@@ -252,7 +234,7 @@ out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
       species.target.plot4[species.target.plot4==0] <- NA
       mean.cover <- apply(species.target.plot4,1, FUN=mean, na.rm=T)
       median.cover <- apply(species.target.plot4,1, FUN=median, na.rm=T)
-
+      
       # Number of years in the time series
       n <- table(target.year)[order(as.numeric(names(table(target.year))),decreasing=T)]
       # Compare subsequent changes in a time series
@@ -285,8 +267,8 @@ out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
         
         ## FMS: Switching to LIST increases the speed of this loop substantially (since it avoids R overwriting a vector with 10^5 rows at every epoch)
         species.change.list <-  rbind(species.change.list, data.frame(
-          project=Projects$RS_PROJECT[i],
-          perm_plot_ID=plot.list[j],
+          RS_PROJECT=Projects$RS_PROJECT[i],
+          RS_PLOT=plot.list[j],
           from.n=as.numeric(n[k+1]), to.n=as.numeric(n[k]), from=as.numeric(names(n)[k+1]),
           to=as.numeric(names(n)[k]),
           species=names(diff.relative.change),
@@ -295,11 +277,11 @@ out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
           relative.rank.change=as.numeric(diff.relative.rank.change),
           absolute.change.colonizer=as.numeric(diff.absolute.change.colonizer),
           absolute.change.extinct=as.numeric(diff.absolute.change.extinct)))
-
+        
         # collect all metrics for resurvey ID x time interval combinations
         # and calculate log response ratios for all metrics
         richness.change.list <- rbind(richness.change.list, data.frame(
-          project=Projects$RS_PROJECT[i],perm_plot_ID=plot.list[j],
+          RS_PROJECT=Projects$RS_PROJECT[i],RS_PLOT=plot.list[j],
           from.n=as.numeric(n[k+1]), to.n=as.numeric(n[k]), from=as.numeric(names(n)[k+1]),
           to=as.numeric(names(n)[k]),
           log.richness.change=log(richness.target.plot[k,]/richness.target.plot[k+1,]),
@@ -314,24 +296,17 @@ out <- foreach(i = c(1:length(unique(DT2$project))), .combine="c") %dopar% {
       }
     }
   }
-  print(paste("i =", i, "nrow richness =", nrow(richness.change.list), "nrow species =", nrow(species.change.list)))
-  out[[1]] <- richness.change.list
-  out[[2]] <- species.change.list
-  names(out) <- c("richness", "species")
-  return(out)
 }
-stopCluster(cl)
+# There are 24 warnings, which are caused by 
+# log(rank.change.pos.sum/-rank.change.neg.sum) : NaNs produced
 
-save(out, file="dopar.output.RData")
-species.change.list <- do.call(rbind, out[which(names(out)=="species")]) 
-richness.change.list <- do.call(rbind, out[which(names(out)=="richness")])
+dim(richness.change.list) 
+#  13987     15  in_MS Fig.2, Results, Methods
 
-dim(richness.change.list) #  13987     16  in_MS Fig.2, Results, Methods
-# correct!
-length(unique(paste(richness.change.list$project,richness.change.list$perm_plot_ID)))
+richness.change.list$RS_PROJECT_PLOT <- paste(richness.change.list$RS_PROJECT,richness.change.list$RS_PLOT, sep="_")
+# Make a unique ID from RS_PROJECT and RS_PLOT 
+length(unique(richness.change.list$RS_PROJECT_PLOT))
 # 7738 in_MS Methods, Abstract
-# Make a unique ID from project and RS_PLOT (=perm_plot_ID) 
-richness.change.list$project_perm_plot_ID <- paste(richness.change.list$project,richness.change.list$perm_plot_ID, sep="_")
 
 # remove empty rows from the resurvey ID x species x time interval combinations
 str(species.change.list) #579449 obs. of  13 variables:
@@ -341,15 +316,13 @@ species.change.list2$mid.year <- ceiling((species.change.list2$to-species.change
 species.change.list2$decade <- floor(species.change.list2$mid.year/10)*10
 species.change.list2$end.decade <- floor(species.change.list2$to/10)*10
 species.change.list2$slope <- species.change.list2$relative.change/(species.change.list2$to-species.change.list2$from)
-species.change.list2$project_perm_plot_ID <- paste(species.change.list2$project,
-                                                   species.change.list2$perm_plot_ID, sep="_")
-str(species.change.list2) #458311 in_MS Results, Methods
+species.change.list2$RS_PROJECT_PLOT <- paste(species.change.list2$RS_PROJECT,
+                                species.change.list2$RS_PLOT, sep="_")
+str(species.change.list2) #458311 obs. of  17 variables, in_MS Results, Methods
 
 ### Step. 3: Calculation of change at the plot level
-# The following code produces Fig. ###
-
 # Histogram on the number of intervals per time series
-table(table(paste(richness.change.list$project,richness.change.list$perm_plot_ID)))
+table(table(paste(richness.change.list$RS_PROJECT,richness.change.list$RS_PLOT)))
 '   1    2    3    4    5    6    7    8    9   10   11   12   13   14   15   16   18 
 6006  798  213  127  105  211   18   19   29    9   92    5    5    9    5   75    1 
   19   20   23   54 
@@ -358,12 +331,21 @@ table(table(paste(richness.change.list$project,richness.change.list$perm_plot_ID
 
 # The following code produces Fig. 1a, 
 # x=log.richness.change has to be replaced with
-# x=log.shannon.change for Fig. 3a
-# x=log.evenness.change for Fig. 3b
-# x=curve.diff for Fig. 3c
-# x=diff.gains.losses for Fig. 3d
-# x=mean.cover.change for Fig. 3e
-# x=median.cover.change for Fig. 3f
+# x=log.shannon.change for Extended Data Fig. 5a
+# x=log.evenness.change for Fig. Extended Data Fig. 5b
+# x=curve.diff for Fig. Extended Data Fig. 5c
+# x=diff.gains.losses for Fig. Extended Data Fig. 5d
+# x=mean.cover.change for Fig. Extended Data Fig. 5e
+# x=median.cover.change for Fig. Extended Data Fig. 5f
+model1 <- lmer(log.richness.change~1 + (1|RS_PROJECT_PLOT), data=richness.change.list)
+summary(model1)
+'Fixed effects:
+              Estimate Std. Error         df t value Pr(>|t|)    
+(Intercept) -6.233e-02  4.565e-03  5.310e+03  -13.65   <2e-16 ***'
+ci(model1, ci=0.95, effects="all")
+'    Parameter   CI      CI_low     CI_high
+1 (Intercept) 0.95 -0.07127268 -0.05338002'
+
 Fig1a <- ggplot(data=richness.change.list, aes(x=log.richness.change)) + 
   geom_histogram(bins = 50, 
                  col="black", fill="grey", 
@@ -383,10 +365,9 @@ Fig1a <- ggplot(data=richness.change.list, aes(x=log.richness.change)) +
     plot.title = element_text(color = "black", size = 10),
     legend.position="none",
     axis.line = element_line(size = 1, color = "grey50")) +
-## MISSING: output from null model, if needed
-#  geom_vline(xintercept = coef(summary(model1))[1],  
-#             linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
-  geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
+    geom_vline(xintercept = coef(summary(model1))[1],  
+               linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
+    geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
 Fig1a
 
 # Statistical test and confidence intervals for each metric
@@ -418,8 +399,7 @@ change <- species.change.list2[,{n_pos <- length(absolute.change[absolute.change
      mean.absolute.change=mean(absolute.change, na.rm=T))}, by=species]
 change # 1794 species
 
-### FMS moved from below
-#  Calculate the probability to increase in cover for the 
+# Calculate the probability to increase in cover for the 
 # 161 species with a significantly negative or positive change
 # (according to a binomial test at p<0.05, with Holm correction) 
 # and at least 100 change observations.
@@ -429,7 +409,6 @@ change2b <- change[p.adjust<0.05 & n>=100,]
 str(change2b) #161 obs. of  11 variables:
 change2b <- change2b[order(change2b$est.binom),]
 dim(change2b) # 161 11 Fig. 4 and Fig. 6
-### FMS end of moved from below
 
 
 # Extended Data Fig. 4
@@ -491,7 +470,6 @@ Fig1b <- ggplot(data=change[n>=100,], aes(x=mean.absolute.change)) +
         plot.title = element_text(color = "black", size = 10),
         legend.position="none",
         axis.line = element_line(size = 1, color = "grey50")) +
-  ## FMS: change2abs missing -> switched to change2b
   geom_vline(xintercept = mean(change2b$mean.absolute.change[change2b$n>=100], na.rm=T),
              linetype="solid", color = "red", size=0.8) + # Add a vertical line at x = mean
   geom_vline(xintercept = 0,linetype="longdash", color = "black", size=0.8)  # Add a vertical line at x = mean
@@ -510,8 +488,6 @@ sample estimates:
 -0.1647953 
 '
 
-
-
 # Produce Fig. 4 (without floristic status and EUNIS affiliation)
 png(filename="Fig4.png", 
     width=4800, height=3600, units = "px", bg="white")
@@ -520,8 +496,6 @@ plot(seq(1:length(change2b$mean.absolute.change)),change2b$mean.absolute.change,
      xaxt="n",yaxt="n",xlab=NA, ylab=NA, type="n", cex.lab=5.5, cex=4, ylim=c(0,1))
 mtext("Probability to increase in cover", side=2, line=7, cex=5.5)
 barplot(-(0.5-change2b$est.binom),width=1, space=0,
-        #FMS Missing object col.vector3, missing column 'eunis' in change2b
-        #col=col.vector3[change2b$eunis.class], 
         offset=0.5, xaxt="n", add=T) 
 errbar(seq(0.5,length(change2b$est.binom),by=1),change2b$est.binom,
        yplus=change2b$conf.binom.plus, 
@@ -543,14 +517,13 @@ dev.off() # creates a file
 # making use of the DescTools package to calculate the
 # Lorenz curve for decrements
 
-
-## FMS: Addition. Please Check
-species.change.list2.neg <- species.change.list2[which(species.change.list2$absolute.change<0),]
-species.change.list2.pos <- species.change.list2[which(species.change.list2$absolute.change>0),]
-## END OF FMS Addition
+species.change.list2.neg <- species.change.list2[absolute.change<0,]
+dim(species.change.list2.neg) [[1]] # 172259 in_MS Fig. 2
+species.change.list2.pos <- species.change.list2[absolute.change>0,]
+dim(species.change.list2.pos) [[1]] # 166557 in_MS Fig. 2
 
 lorenz.curve.neg <- Lc(abs(species.change.list2.neg$absolute.change))
-# and the Lorenz curve for increments
+# and the Lorenz curve for increments, using the Lc command from DescTools
 lorenz.curve.pos <- Lc(abs(species.change.list2.pos$absolute.change))
 # these objects are used to draw the confidence intervals below
 
@@ -596,7 +569,7 @@ str(res) # list of 2
 
 # Produce Fig. 2a
 # the confidence bands are calculated with the lines command
-# from ###
+# from DescTools
 # Note: this may take a few minutes for the calculation!
 png(filename="Fig2a.png", width=800, height=600, units = "px", bg="white")
 plot(res$neg[,2] ~ res$neg[,1], type="n", xlab="Proportion of observations", 
@@ -618,27 +591,26 @@ dev.off()
 # Calculate the Gini coefficient
 # FMS: Missing species.change.list2abs.neg --> Should it be species.change.list2.neg?
 DescTools::Gini(x = abs(species.change.list2.neg$absolute.change),conf.level=0.95, R=1000, 
-     type="perc", unbiased=T) 
- '     gini    lwr.ci    upr.ci 
- 0.7122290 0.7106420 0.7137571  '
+                type="perc", unbiased=T) 
+'     gini    lwr.ci    upr.ci 
+0.7122407 0.7106913 0.7137028 '
 # FMS: Missing species.change.list2abs.pos --> Should it be species.change.list2.pos?
 DescTools::Gini(x = abs(species.change.list2.pos$absolute.change),conf.level=0.95, R=1000, 
-    type="perc", unbiased=T) 
-'      gini    lwr.ci    upr.ci 
-0.7182867 0.7165996 0.7200943 '
+                type="perc", unbiased=T) 
+'     gini    lwr.ci    upr.ci 
+0.7182918 0.7165554 0.7199334  '
 
 ### Step 6: Calculation of the Gini coefficient 
 # of increments and decrements across all species
 
 # divide species by their mean decrease, increase and absence of change
-## FMS: Missing change2  --> replaced with 'change'
-change3 <- change[order(change$mean.absolute.change, decreasing = T),]
-change.neg <- change3[mean.absolute.change<0,]
+change <- change[order(change$mean.absolute.change, decreasing = T),]
+change.neg <- change[mean.absolute.change<0,]
 dim(change.neg) [[1]] #1011
-change3 <- change3[order(change3$mean.absolute.change, decreasing = F),]
-change.pos <- change3[mean.absolute.change>0,]
+change <- change[order(change$mean.absolute.change, decreasing = F),]
+change.pos <- change[mean.absolute.change>0,]
 dim(change.pos) [[1]] #719
-dim(change3[mean.absolute.change==0,]) [[1]] #64
+dim(change[mean.absolute.change==0,]) [[1]] #64
 1011+719+64 #1794
 
 # Produce the Lorenz curves by  
@@ -655,9 +627,8 @@ for (i in 1:(dim(change.neg)[[1]])){
     decr[i,2] <- decr[i-1,2] + abs(change.neg$mean.absolute.change[i]) 
   }
 }
-## FMS - The following results cannot be reproduced with the current code
-decr[dim(change.neg)[[1]],1] # 81
-decr[dim(change.neg)[[1]],2] # 1.195169
+decr[dim(change.neg)[[1]],1] # 1011
+decr[dim(change.neg)[[1]],2] # 1366.295
 # number of decreasing species and the species' mean changes are scaled to 1, 
 # using the last data line for cumulative species number and cumulated changes
 decr[,1] <- decr[,1]/decr[dim(change.neg)[[1]],1]
@@ -675,15 +646,14 @@ for (i in 1:(dim(change.pos)[[1]])){
     incr[i,2] <- incr[i-1,2] + abs(change.pos$mean.absolute.change[i]) #*change.pos$n[i]
   }
 }
-incr[dim(change.pos)[[1]],1] #91
-incr[dim(change.pos)[[1]],2] # 1.455861
+incr[dim(change.pos)[[1]],1] # 719
+incr[dim(change.pos)[[1]],2] #  1195.36
 # number of increasing species and the species' mean changes are scaled to 1, 
 # using the last data line for cumulative species number and cumulated changes
 incr[,1] <- incr[,1]/incr[dim(change.pos)[[1]],1]
 incr[,2] <- incr[,2]/incr[dim(change.pos)[[1]],2]
 
-# making use of the DescTools package to calculate the
-# Lorenz curve for decrements
+# Lorenz curve for decrements, using the Lc command from the DescTools package
 lorenz.curve.change.neg <- Lc(abs(change.neg$mean.absolute.change))
 # and the Lorenz curve for increments
 lorenz.curve.change.pos <- Lc(abs(change.pos$mean.absolute.change))
@@ -704,18 +674,18 @@ lines(lorenz.curve.change.pos, col="blue", lwd=2)
 lines(c(0,1),c(0,1), lwd=2)
 legend("topleft", bty="n", cex=2,
        lty=1, lwd=2, col=c("red","blue"), 
-       legend=c("Species with negative mean change", "Species with positive mean change"))
+       legend=c("Losers", "Winners"))
 mtext("b",side=2,line=4, at=1.05, las=1, cex=3)
 dev.off()
 
 
 # Calculate the Gini coefficients
 DescTools::Gini(x = abs(change.neg$mean.absolute.change),conf.level=0.95, R=1000, 
-     type="perc", unbiased=T) 
+                type="perc", unbiased=T) 
 '     gini    lwr.ci    upr.ci 
 0.6915324 0.6597624 0.7179777  '
 
 DescTools::Gini(x = abs(change.pos$mean.absolute.change),conf.level=0.95, R=1000, 
-     type="perc", unbiased=T) 
+                type="perc", unbiased=T) 
 '     gini    lwr.ci    upr.ci 
 0.7775708 0.7197622 0.8164880  '
