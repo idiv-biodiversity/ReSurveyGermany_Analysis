@@ -6,9 +6,9 @@
 # Müller, N., Naaf, T., Peppler- Lisbach, C., Poschlod, P., Roscher, C., 
 # Rosenthal, G., Rumpf, S., Schmidt, W., Schrautzer, W., Schwabe, A., 
 # Schwartze, P., Sperle, T., Stanik, N., Storm, C., Voigt, W., Wegener, U., 
-# Wesche, K., Wittig, B., Wulf, M. (2022): More losers than winners over one 
-# century plant diversity change in Germany.
-# Nature
+# Wesche, K., Wittig, B., Wulf, M. (2022): More losses than gains during one 
+# century of plant biodiversity change in Germany.
+# Nature https://doi.org/10.1038/s41586-022-05320-w
 #
 # Author: Helge Bruelheide, 23.05.2022
 # with contributions of Francesco Maria Sabatini 19.05.2022
